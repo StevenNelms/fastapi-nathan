@@ -1,43 +1,33 @@
 from fastapi import FastAPI
+from fastapi.responses import JSONResponse
 from sqlalchemy import create_engine, text
 from sqlalchemy.exc import SQLAlchemyError
-from typing import List
-from pydantic import BaseModel
+import os
 
 app = FastAPI()
 
-# Database config
-DATABASE_URL = "postgresql://postgres:FoogimaFoogima123!@localhost:5432/productive_resource_db"
+# Pull from environment variable set in Render
+DATABASE_URL = os.getenv("DATABASE_URL")
+
+if not DATABASE_URL:
+    raise RuntimeError("❌ DATABASE_URL environment variable is not set!")
+
+# Create SQLAlchemy engine
 engine = create_engine(DATABASE_URL)
 
-# Response schema
-class Person(BaseModel):
-    id: str
-    first_name: str | None = None
-    last_name: str | None = None
+@app.get("/")
+def root():
+    return {"message": "Nathan is live and listening 👂"}
 
-@app.get("/people", response_model=List[Person])
-def get_people():
+@app.get("/people")
+def read_people():
     try:
-        with engine.connect() as connection:
-            result = connection.execute(text("""
-                SELECT id, first_name, last_name
-                FROM people
-                ORDER BY id
-                LIMIT 10
-            """))
-
-            people = []
-            for row in result:
-                person = {
-                    "id": str(row[0]),
-                    "first_name": row[1] if row[1] else None,
-                    "last_name": row[2] if row[2] else None
-                }
-                people.append(person)
-
-            return people
-
+        with engine.connect() as conn:
+            result = conn.execute(text("SELECT id, first_name, last_name FROM people LIMIT 10"))
+            rows = result.mappings().all()  # Convert rows to dictionaries
+        return JSONResponse(content=rows)
     except SQLAlchemyError as e:
-        print("❌ Database error:", e)
-        return []
+        return JSONResponse(
+            status_code=500,
+            content={"error": f"❌ Database error: {str(e)}"}
+        )

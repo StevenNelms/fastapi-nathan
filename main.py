@@ -59,3 +59,31 @@ def read_view(view_name: str):
         return {"rows": rows}
     except SQLAlchemyError as e:
         return JSONResponse(status_code=500, content={"error": f"❌ Database error: {str(e)}"})
+
+from fastapi.routing import APIRouter
+
+# --- Auto-expose raw tables ---
+raw_tables = [
+    "people", "custom_field_options", "companies", "deal_cost_rates",
+    "deals", "budgets", "service_assignments", "services", "time_entries",
+    "project_assignments", "projects", "service_types", "burn_entries"
+]
+
+router = APIRouter()
+
+for table in raw_tables:
+    @router.get(f"/{table}")
+    async def read_table(table_name=table):
+        try:
+            with engine.connect() as conn:
+                result = conn.execute(text(f"SELECT * FROM {table} LIMIT 100"))
+                rows = [dict(row) for row in result.mappings().all()]
+            return JSONResponse(content=rows)
+        except SQLAlchemyError as e:
+            return JSONResponse(
+                status_code=500,
+                content={"error": f"❌ Error reading {table_name}: {str(e)}"}
+            )
+
+app.include_router(router)
+

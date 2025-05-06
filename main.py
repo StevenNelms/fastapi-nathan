@@ -1,8 +1,9 @@
-from fastapi import FastAPI
+import os
+from fastapi import FastAPI, HTTPException
 from fastapi.responses import JSONResponse
+from fastapi.routing import APIRouter
 from sqlalchemy import create_engine, text
 from sqlalchemy.exc import SQLAlchemyError
-import os
 
 # ── App Setup ──
 app = FastAPI(title="Nathan's API")
@@ -14,7 +15,7 @@ if not DATABASE_URL:
 
 engine = create_engine(DATABASE_URL)
 
-# ── Valid views ──
+# ── Valid views (read-only) ──
 VALID_VIEWS = {
     "assignment_summary",
     "staffing_candidates",
@@ -28,62 +29,55 @@ VALID_VIEWS = {
     "budgets_summary",
     "gantt_assignments",
     "service_burn_entries",
-    "pending_assignments_summary"
+    "pending_assignments_summary",
 }
 
-# ── Routes ──
+# ── Raw tables (auto-generated endpoints) ──
+RAW_TABLES = [
+    "people",
+    "companies",
+    "deals",
+    "budgets",
+    "projects",
+    "project_assignments",
+    "service_assignments",
+    "services",
+    "time_entries",
+    "custom_fields",
+    "custom_field_options",
+]
 
+# ── Root health-check ──
 @app.get("/")
 def root():
     return {"message": "✅ Nathan API is live and connected!"}
 
-@app.get("/people")
-def read_people():
-    try:
-        with engine.connect() as conn:
-            result = conn.execute(text("SELECT id, first_name, last_name FROM people LIMIT 10"))
-            people = [dict(row) for row in result.mappings().all()]
-        return JSONResponse(content=people)
-    except SQLAlchemyError as e:
-        return JSONResponse(status_code=500, content={"error": f"❌ Database error: {str(e)}"})
-
+# ── View endpoints ──
 @app.get("/views/{view_name}")
 def read_view(view_name: str):
     if view_name not in VALID_VIEWS:
-        return JSONResponse(status_code=400, content={"error": "❌ Invalid view name"})
-
+        raise HTTPException(status_code=400, detail="❌ Invalid view name")
     try:
         with engine.connect() as conn:
             result = conn.execute(text(f"SELECT * FROM {view_name}"))
-            rows = [dict(row) for row in result.mappings().all()]
+            rows = [dict(r) for r in result.mappings().all()]
         return {"rows": rows}
     except SQLAlchemyError as e:
-        return JSONResponse(status_code=500, content={"error": f"❌ Database error: {str(e)}"})
+        raise HTTPException(status_code=500, detail=f"❌ Database error: {e}")
 
-from fastapi.routing import APIRouter
+# ── Raw table endpoints ──
+router = APIRouter(prefix="/raw", tags=["raw"])
 
-# --- Auto-expose raw tables ---
-raw_tables = [
-    "people", "custom_field_options", "companies", "deal_cost_rates",
-    "deals", "budgets", "service_assignments", "services", "time_entries",
-    "project_assignments", "projects", "service_types", "burn_entries"
-]
-
-router = APIRouter()
-
-for table in raw_tables:
-    @router.get(f"/{table}")
+for table in RAW_TABLES:
     async def read_table(table_name=table):
         try:
             with engine.connect() as conn:
-                result = conn.execute(text(f"SELECT * FROM {table} LIMIT 100"))
-                rows = [dict(row) for row in result.mappings().all()]
-            return JSONResponse(content=rows)
+                result = conn.execute(text(f"SELECT * FROM {table_name}"))
+                data = [dict(r) for r in result.mappings().all()]
+            return JSONResponse(content=data)
         except SQLAlchemyError as e:
-            return JSONResponse(
-                status_code=500,
-                content={"error": f"❌ Error reading {table_name}: {str(e)}"}
-            )
+            return JSONResponse(status_code=500, content={"error": f"❌ Error reading {table_name}: {e}"})
+
+    router.add_api_route(f"/{table}", read_table, methods=["GET"])
 
 app.include_router(router)
-
